@@ -6,131 +6,84 @@ import os
 
 from services.download_service import DownloadService
 from services.minio_service import MinioService
-from services.app_services import (check_health_all_service, get_embedding, insert_embedding,
-                                   get_similar_image_by_embedding, save_error_output_to_file)
+from services.app_services import (get_embedding, insert_embedding, delete_image_embedding, reset_chromadb,
+                                   get_similar_image_by_embedding, update_saved_image_batch_status,
+                                   update_delete_image_batch_status, update_reset_batch_status,
+                                   update_similar_image_batch_status)
 
-from utils.config import ServerURLS
-from utils.config import Endpoints
+from model.MQMessage import MQMessage, EventTypeEnum
 
-import requests
+from utils.config import RabbitMQConfig
+from utils.constants import Status
+from utils.logger import logger
 
-app = Flask(__name__)
-CORS(app)
-check_health_all_service()
+from typing import List
 
 minio_service = MinioService()
 
 
-@app.get("/health_check")
-def health_check():
-    return Response(
-        status=200,
-        response=json.dumps({
-            "status": "ok"
-        })
-    )
+def save_image(batch_id, user_id, image_url):
+    download_service = DownloadService()
 
-
-@app.post("/save_image")
-def save_image():
     try:
-        print("Hit route : /save_image")
-        image_url = request.json.get("image_url")
-        download_service = DownloadService()
         download_service.download_image(image_url)
-        try:
-            minio_service.put_file(download_service.temp_file_path, download_service.temp_image_name)
-            embedding = get_embedding(download_service.temp_image_name)
-            insert_embedding(embedding, download_service.temp_image_name, download_service.file_id)
-        except Exception as e:
-            print(f"Error in saving image : {e}")
-        finally:
-            download_service.delete_image()
-
-        return Response(status=200,
-                        response=json.dumps({
-                            "status": "saved image"
-                        }))
-    except Exception as e:
-        print(f"Error in saving image : {e}")
-        return Response(status=500,
-                        response=json.dumps({
-                            "status": "Error in saving image",
-                            "error": str(e)
-                        }))
-
-
-@app.delete("/delete_image_by_id/<id>")
-def delete_image_by_id(id_):
-    try:
-        delete_embedding_url = f"{ServerURLS.CHROMADB_URL}{Endpoints.DELETE_COLLECTION_BY_ID}/{id_}"
-        resp = requests.delete(delete_embedding_url)
-        print(f"Deleted image embedding by id status : {resp.status_code}")
-
-        minio_service.delete_file(f"temp_image_{id_}.png")
-        print(f"Deleted image from minio")
-
-        return Response(status=200,
-                        response=json.dumps({
-                            "status": "deleted image"
-                        }))
-    except Exception as e:
-        print(f"Error in deleting image : {e}")
-        return Response(status=500,
-                        response=json.dumps({
-                            "status": "Error in deleting image",
-                            "error": str(e)
-                        }))
-
-
-@app.post("/get_similar_image")
-def get_similar_image():
-    try:
-        image_url = request.json.get("image_url")
-
-        download_service = DownloadService()
-        download_service.download_image(image_url)
-
         minio_service.put_file(download_service.temp_file_path, download_service.temp_image_name)
-
         embedding = get_embedding(download_service.temp_image_name)
+        insert_embedding(embedding, download_service.temp_image_name, download_service.file_id)
 
+    except Exception as e:
+        logger.error(f"Error in saving image : {e}")
+        update_saved_image_batch_status(batch_id, user_id, image_url, Status.FAILED)
+    else:
+        logger.info(f"Successfully saved image of url : {image_url}")
+        update_saved_image_batch_status(batch_id, user_id, image_url, Status.SUCCESS, download_service.temp_image_name)
+    finally:
+        download_service.delete_image()
+
+
+def delete_image_by_id(batch_id: str, user_id: str, image_id: str):
+    try:
+        delete_image_embedding(image_id)
+        minio_service.delete_file(f"temp_image_{image_id}.png")
+
+    except Exception as e:
+        logger.error(f"Error in deleting image : {e}")
+        update_delete_image_batch_status(batch_id, user_id, image_id, Status.FAILED)
+    else:
+        logger.info(f"Successfully deleted image of id : {image_id}")
+        update_delete_image_batch_status(batch_id, user_id, image_id, Status.SUCCESS)
+
+
+def get_similar_image(batch_id, user_id, image_id):
+    try:
+        embedding = get_embedding(f"temp_image_{image_id}.png")
         resp = get_similar_image_by_embedding(embedding)
 
-        return Response(status=200,
-                        response=json.dumps({
-                            "similar_image": resp
-                        }))
+        id_score_map_list: List[dict] = [{resp["status"]["ids"][0][index]: resp["status"]["distances"][0][index]} for
+                                         index, id_ in
+                                         enumerate(resp["status"]["ids"][0])]
+
     except Exception as e:
-        # print(f"Error in fetching similar image : {e}")
-        save_error_output_to_file(e)
-        return Response(status=500,
-                        response=json.dumps({
-                            "status": "Error in fetching similar image",
-                            "error": str(e)
-                        }))
+        logger.error(f"Error in fetching similar images : {e}")
+        update_similar_image_batch_status(batch_id, user_id, image_id, Status.FAILED)
+    else:
+        logger.info(f"Successfully fetched similar images of id : {image_id}")
+        update_similar_image_batch_status(batch_id, user_id, image_id, Status.SUCCESS, id_score_map_list)
 
 
-@app.get("/reset_db_and_minio")
-def reset_db_and_minio():
+def reset_db_and_minio(batch_id, user_id):
     try:
-        status = minio_service.reset_bucket()
-        reset_db_url = f"{ServerURLS.CHROMADB_URL}{Endpoints.RESET_DB}"
-        resp = requests.get(reset_db_url)
-
-        return Response(status=200,
-                        response=json.dumps({
-                            "reset_db": resp.json().get("status"),
-                            "reset_minio": status
-                        }))
+        minio_service.reset_bucket()
+        reset_chromadb()
 
     except Exception as e:
-        print(f"Error in resetting DB : {e}")
-        return Response(status=500,
-                        response=json.dumps({
-                            "status": "Error in resetting DB",
-                            "error": str(e)
-                        }))
+        logger.error(f"Error in resetting db and/or minio : {e}")
+        update_reset_batch_status(batch_id, user_id, Status.FAILED)
+    else:
+        logger.info(f"Successfully Reset DB and minio")
+        update_reset_batch_status(batch_id, user_id, Status.SUCCESS)
+
+
 def main():
     connection = pika.BlockingConnection(pika.ConnectionParameters(host=RabbitMQConfig.RABBIT_MQ_HOST))
     channel = connection.channel()

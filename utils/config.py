@@ -19,6 +19,7 @@ class MinioConfig:
 class ServerURLS:
     CHROMADB_URL = getenv("CHROMADB_URL", "http://localhost:5646")
     EMBEDDING_SERVER_URL = getenv("EMBEDDING_SERVER_URL", "http://localhost:5545")
+    MARIADB_SERVER_URL = getenv("MARIADB_SERVER_URL", "")
 
 
 @dataclass
@@ -29,3 +30,9 @@ class Endpoints:
     SIMILAR_IMAGE = "/get_similar_image"
     DELETE_COLLECTION_BY_ID = "/delete_id_from_coll"
     RESET_DB = "/reset_db"
+
+    UPDATE_SAVE_IMAGE_BATCH_STATUS = "/update_save_image_batch_status"
+    UPDATE_DELETE_IMAGE_BATCH_STATUS = "/update_delete_image_batch_status"
+    UPDATE_RESET_IMAGE_BATCH_STATUS = "/update_reset_image_batch_status"
+    UPDATE_SIMILAR_IMAGE_BATCH_STATUS = "/update_similar_image_batch_status"
+
