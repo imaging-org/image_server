@@ -3,6 +3,12 @@ from os import getenv
 
 
 @dataclass
+class RabbitMQConfig:
+    RABBIT_MQ_HOST = getenv("RABBIT_MQ_HOST", "localhost")
+    QUEUE_NAME = getenv("QUEUE_NAME", "image_service_queue")
+
+
+@dataclass
 class MinioConfig:
     ACCESS_KEY = getenv("ACCESS_KEY", "qLU7Yb5jfyXmHQhUyRb5")
     SECRET_KEY = getenv("SECRET_KEY", "FEAVIoGFuY179WzrGkYhj9swt3IMjCqb8cwFP5db")

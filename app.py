@@ -1,7 +1,8 @@
 import json
 
-from flask import Flask, Response, request
-from flask_cors import CORS
+import pika
+import sys
+import os
 
 from services.download_service import DownloadService
 from services.minio_service import MinioService
@@ -130,7 +131,42 @@ def reset_db_and_minio():
                             "status": "Error in resetting DB",
                             "error": str(e)
                         }))
+def main():
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host=RabbitMQConfig.RABBIT_MQ_HOST))
+    channel = connection.channel()
+
+    channel.queue_declare(queue=RabbitMQConfig.QUEUE_NAME)
+
+    def callback(ch, method, properties, body):
+        logger.debug(ch)
+        logger.debug(method)
+        logger.debug(properties)
+        logger.debug(f" [x] Received {body}")
+        data = json.load(body)
+        message = MQMessage.from_json(data)
+
+        if message.EventType.value == EventTypeEnum.SAVE.value:
+            save_image(message.batch_id, message.user_id, message.ImageURL)
+        elif message.EventType.value == EventTypeEnum.SIMILAR.value:
+            get_similar_image(message.batch_id, message.user_id, message.image_id)
+        elif message.EventType.value == EventTypeEnum.DELETE.value:
+            delete_image_by_id(message.batch_id, message.user_id, message.image_id)
+        elif message.EventType.value == EventTypeEnum.RESET.value:
+            reset_db_and_minio(message.batch_id, message.user_id)
+
+    channel.basic_consume(queue=RabbitMQConfig.QUEUE_NAME, on_message_callback=callback, auto_ack=True)
+
+    logger.info(' [*] Waiting for messages. To exit press CTRL+C')
+    channel.start_consuming()
 
 
 if __name__ == '__main__':
-    app.run(debug=False, host="0.0.0.0", port=4747)
+    try:
+        main()
+
+    except KeyboardInterrupt:
+        logger.error('Interrupted')
+        try:
+            sys.exit(0)
+        except SystemExit:
+            os.abort()
