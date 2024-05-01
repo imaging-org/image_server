@@ -4,6 +4,8 @@ import uuid
 import requests
 import os
 
+from utils.logger import logger
+
 
 class DownloadService:
     def __init__(self):
@@ -19,7 +21,7 @@ class DownloadService:
         self.temp_file_path = os.path.join(self._temp_dir_path, self.temp_image_name)
 
     def download_image(self, url):
-        print(f"Downloading image and saving as file : {self.temp_file_path}")
+        logger.info(f"Downloading image and saving as file : {self.temp_file_path}")
 
         resp = requests.get(url, stream=True)
         with open(self.temp_file_path, "wb") as out_file:

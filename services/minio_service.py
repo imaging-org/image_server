@@ -1,5 +1,6 @@
 from minio import Minio
 from utils.config import MinioConfig
+from utils.logger import logger
 
 
 class MinioService:
@@ -15,16 +16,16 @@ class MinioService:
             self._client.make_bucket(MinioConfig.BUCKET_NAME)
 
     def put_file(self, file_path, object_key):
-        print("Putting file to Minio")
         self._client.fput_object(
             MinioConfig.BUCKET_NAME,
             file_path=file_path,
             object_name=object_key
         )
-        print("Successfully put file to Minio")
+        logger.info("Successfully put file to Minio")
 
     def delete_file(self, object_key):
         self._client.remove_object(MinioConfig.BUCKET_NAME, object_name=object_key)
+        logger.info(f"Deleted image from minio")
 
     def reset_bucket(self):
         try:
@@ -34,7 +35,5 @@ class MinioService:
             self._client.remove_bucket(MinioConfig.BUCKET_NAME)
             self._client.make_bucket(MinioConfig.BUCKET_NAME)
         except Exception as e:
-            print(f"Error in resetting minio : {e}")
-            return "Failed"
-        else:
-            return "Success"
+            logger.error(f"Error in resetting minio : {e}")
+            raise Exception("Error in resetting minio")
